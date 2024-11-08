@@ -13,12 +13,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/cedws/w101-client-go/dml"
 	crypto "github.com/cedws/w101-client-go/login"
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
+)
+
+var (
+	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
+	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
 )
 
 const (
@@ -163,6 +169,9 @@ func requestCK2Token(ctx context.Context, username, password string) (uint64, st
 		return 0, "", err
 	}
 
+	ctx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errTimeoutAuthenRsp)
+	defer cancel()
+
 	select {
 	case rsp := <-authenRspCh:
 		ck2 := crypto.DecryptRec1([]byte(rsp.Rec1), sid, sessionTimeSecs, sessionTimeMillis)
@@ -249,6 +258,9 @@ func latestFileList(ctx context.Context) (*patch.LatestFileListV2, error) {
 	if err := c.LatestFileListV2(&patch.LatestFileListV2{}); err != nil {
 		return nil, err
 	}
+
+	ctx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errTimeoutFileList)
+	defer cancel()
 
 	select {
 	case fileList := <-fileListCh:
