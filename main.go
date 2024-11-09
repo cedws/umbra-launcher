@@ -22,14 +22,14 @@ import (
 	"github.com/cedws/w101-proto-go/pkg/patch"
 )
 
+const (
+	defaultLoginServer = "login.us.wizard101.com:12000"
+	defaultPatchServer = "patch.us.wizard101.com:12500"
+)
+
 var (
 	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
 	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
-)
-
-const (
-	loginServer = "login.us.wizard101.com:12000"
-	patchServer = "patch.us.wizard101.com:12500"
 )
 
 type patchHandler struct {
@@ -53,30 +53,55 @@ func (l loginHandler) UserAuthenRsp(m login.UserAuthenRsp) {
 func main() {
 	ctx := context.Background()
 
-	var username, password string
+	var (
+		dir                              string
+		username, password               string
+		loginServerAddr, patchServerAddr string
+		patchOnly                        bool
+	)
+
+	flag.StringVar(&dir, "dir", "Wizard101", "client directory")
 
 	flag.StringVar(&username, "username", "", "login username")
 	flag.StringVar(&password, "password", "", "login password")
 
+	flag.StringVar(&loginServerAddr, "login-server", defaultLoginServer, "login server addr")
+	flag.StringVar(&patchServerAddr, "patch-server", defaultPatchServer, "patch server addr")
+
+	flag.BoolVar(&patchOnly, "patch-only", false, "only patch files without logging in")
+
 	flag.Parse()
 
-	if username == "" || password == "" {
+	if !patchOnly && (username == "" || password == "") {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if err := startPatch(ctx, username, password); err != nil {
+	params := LaunchParams{
+		Dir:             dir,
+		Username:        username,
+		Password:        password,
+		PatchOnly:       patchOnly,
+		LoginServerAddr: loginServerAddr,
+		PatchServerAddr: patchServerAddr,
+	}
+
+	if err := launch(ctx, params); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func startPatch(ctx context.Context, username, password string) error {
-	userID, ck2, err := requestCK2Token(ctx, username, password)
-	if err != nil {
-		return err
-	}
+type LaunchParams struct {
+	Dir             string
+	Username        string
+	Password        string
+	PatchOnly       bool
+	LoginServerAddr string
+	PatchServerAddr string
+}
 
-	fileList, err := latestFileList(ctx)
+func launch(ctx context.Context, params LaunchParams) error {
+	fileList, err := latestFileList(ctx, params)
 	if err != nil {
 		return err
 	}
@@ -100,21 +125,28 @@ func startPatch(ctx context.Context, username, password string) error {
 		slog.Info("Downloading files for table", "table", table.Name)
 
 		for _, record := range table.Records {
-			if err := download(ctx, fileList.URLPrefix, record); err != nil {
+			if err := download(ctx, fileList.URLPrefix, record, params); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := launch(ctx, userID, username, ck2); err != nil {
-		return err
+	if !params.PatchOnly {
+		userID, ck2, err := requestCK2Token(ctx, params)
+		if err != nil {
+			return err
+		}
+
+		if err := launchGraphicalClient(ctx, userID, ck2, params); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func launch(ctx context.Context, userID uint64, username, ck2 string) error {
-	host, port, err := net.SplitHostPort(loginServer)
+func launchGraphicalClient(ctx context.Context, userID uint64, ck2 string, params LaunchParams) error {
+	host, port, err := net.SplitHostPort(defaultLoginServer)
 	if err != nil {
 		return err
 	}
@@ -123,29 +155,29 @@ func launch(ctx context.Context, userID uint64, username, ck2 string) error {
 		"-L", host, port,
 		"-U", ".." + fmt.Sprint(userID),
 		string(ck2),
-		username,
+		params.Username,
 	}
 	slog.Info("Launching WizardGraphicalClient.exe", "args", args)
 
 	cmd := exec.CommandContext(ctx, "./WizardGraphicalClient.exe", args...)
-	cmd.Dir = "patch/Bin"
+	cmd.Dir = filepath.Join(params.Dir, "Bin")
 
 	return cmd.Start()
 }
 
-func requestCK2Token(ctx context.Context, username, password string) (uint64, string, error) {
+func requestCK2Token(ctx context.Context, params LaunchParams) (uint64, string, error) {
 	authenRspCh := make(chan login.UserAuthenRsp)
 
 	r := proto.NewMessageRouter()
 	login.RegisterLoginService(r, &loginHandler{authenRspCh: authenRspCh})
 
-	slog.Info("Connecting to login server", "server", loginServer)
-
-	protoClient, err := proto.Dial(ctx, loginServer, r)
+	protoClient, err := proto.Dial(ctx, params.LoginServerAddr, r)
 	if err != nil {
 		return 0, "", err
 	}
 	defer protoClient.Close()
+
+	slog.Info("Connected to login server", "server", params.LoginServerAddr)
 
 	var (
 		sid               = protoClient.SessionID()
@@ -154,8 +186,8 @@ func requestCK2Token(ctx context.Context, username, password string) (uint64, st
 	)
 
 	var (
-		ck1       = crypto.GenerateCK1(password, sid, sessionTimeSecs, sessionTimeMillis)
-		authToken = crypto.AuthenToken(username, ck1, sid)
+		ck1       = crypto.GenerateCK1(params.Password, sid, sessionTimeSecs, sessionTimeMillis)
+		authToken = crypto.AuthenToken(params.Username, ck1, sid)
 		rec1      = crypto.EncryptRec1(authToken, sid, sessionTimeSecs, sessionTimeMillis)
 	)
 
@@ -181,7 +213,7 @@ func requestCK2Token(ctx context.Context, username, password string) (uint64, st
 	}
 }
 
-func download(ctx context.Context, prefix string, record dml.Record) error {
+func download(ctx context.Context, prefix string, record dml.Record, params LaunchParams) error {
 	srcFileName := record["SrcFileName"].(string)
 	tarFileName := record["TarFileName"].(string)
 
@@ -191,7 +223,7 @@ func download(ctx context.Context, prefix string, record dml.Record) error {
 
 	dirname := filepath.Dir(tarFileName)
 
-	fulldir := filepath.Join("patch", dirname)
+	fulldir := filepath.Join(params.Dir, dirname)
 	if err := os.MkdirAll(fulldir, 0755); err != nil {
 		return err
 	}
@@ -209,7 +241,7 @@ func download(ctx context.Context, prefix string, record dml.Record) error {
 	}
 	defer resp.Close()
 
-	file, err := os.Create(filepath.Join("patch", tarFileName))
+	file, err := os.Create(filepath.Join(params.Dir, tarFileName))
 	if err != nil {
 		return err
 	}
@@ -240,21 +272,21 @@ func request(ctx context.Context, url string) (io.ReadCloser, error) {
 	return resp.Body, err
 }
 
-func latestFileList(ctx context.Context) (*patch.LatestFileListV2, error) {
+func latestFileList(ctx context.Context, params LaunchParams) (*patch.LatestFileListV2, error) {
 	fileListCh := make(chan patch.LatestFileListV2)
 
 	r := proto.NewMessageRouter()
 	patch.RegisterPatchService(r, &patchHandler{fileListCh: fileListCh})
 
-	client, err := proto.Dial(ctx, patchServer, r)
+	protoClient, err := proto.Dial(ctx, params.PatchServerAddr, r)
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
+	defer protoClient.Close()
 
-	slog.Info("Connected to patch server", "server", patchServer)
+	slog.Info("Connected to patch server", "server", params.PatchServerAddr)
 
-	c := patch.NewPatchClient(client)
+	c := patch.NewPatchClient(protoClient)
 	if err := c.LatestFileListV2(&patch.LatestFileListV2{}); err != nil {
 		return nil, err
 	}
