@@ -223,13 +223,13 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 		target = source
 	}
 
-	source = filepath.Clean(source)
-	target = filepath.Clean(target)
-
 	fileURL, err := url.JoinPath(urlPrefix, source)
 	if err != nil {
 		return err
 	}
+
+	source = filepath.Clean(source)
+	target = filepath.Clean(target)
 
 	patchFile := patchFile{
 		URL:    fileURL,
