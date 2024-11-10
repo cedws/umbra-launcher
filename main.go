@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"log/slog"
+	"math/bits"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,7 +24,6 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
-	"github.com/snksoft/crc"
 )
 
 const (
@@ -34,34 +36,35 @@ var (
 	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
 )
 
-var makeHasherOnce = sync.OnceValue(func() fileHasher {
-	hash := *crc.NewHash(&crc.Parameters{
-		Width:      32,
-		Polynomial: 0x4C11DB7,
-		ReflectIn:  true,
-		ReflectOut: true,
-		Init:       0,
-		FinalXor:   0,
-	})
-
-	return fileHasher{hash}
+var makeTableOnce = sync.OnceValue(func() crc32.Table {
+	polyReversed := bits.Reverse32(0x4C11DB7)
+	return *crc32.MakeTable(polyReversed)
 })
 
-type fileHasher struct {
-	crc.Hash
+func newReverseHasher() reverseHasher {
+	return reverseHasher{
+		table: makeTableOnce(),
+		sum32: 0xFFFFFFFF,
+	}
 }
 
-func (f *fileHasher) Write(b []byte) (int, error) {
-	f.Hash.Update(b)
+type reverseHasher struct {
+	table crc32.Table
+	sum32 uint32
+}
+
+func (h *reverseHasher) Sum32() uint32 {
+	return h.sum32 ^ 0xFFFFFFFF
+}
+
+func (h *reverseHasher) Write(b []byte) (int, error) {
+	h.sum32 = crc32.Update(h.sum32, &h.table, b)
 	return len(b), nil
 }
 
-func (f *fileHasher) CRC32() uint32 {
-	return f.Hash.CRC32()
-}
-
-func (f *fileHasher) Reset() {
-	f.Hash.Reset()
+func (h *reverseHasher) Reset() {
+	h.table = makeTableOnce()
+	h.sum32 = 0xFFFFFFFF
 }
 
 type patchHandler struct {
@@ -127,11 +130,11 @@ func main() {
 
 type patchClient struct {
 	launchParams
-	hasher *fileHasher
+	hasher *reverseHasher
 }
 
 func newPatchClient(params launchParams) *patchClient {
-	hasher := makeHasherOnce()
+	hasher := newReverseHasher()
 
 	return &patchClient{
 		launchParams: params,
@@ -379,7 +382,9 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	if _, err := io.Copy(p.hasher, file); err != nil {
 		return false, err
 	}
-	actualCRC := p.hasher.CRC32()
+	actualCRC := p.hasher.Sum32()
+
+	slog.Info("File CRC", "actual", actualCRC, "expected", patchFile.CRC)
 
 	return actualCRC == patchFile.CRC, nil
 }
