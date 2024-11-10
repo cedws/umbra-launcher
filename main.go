@@ -308,6 +308,10 @@ func (p *launchParams) requestCK2Token(ctx context.Context, params launchParams)
 
 	select {
 	case rsp := <-authenRspCh:
+		if rsp.Error != 0 {
+			return 0, "", fmt.Errorf("error code %d during auth (reason: %s)", rsp.Error, rsp.Reason)
+		}
+
 		ck2 := crypto.DecryptRec1([]byte(rsp.Rec1), sid, sessionTimeSecs, sessionTimeMillis)
 		return rsp.UserID, string(ck2), nil
 	case <-ctx.Done():
