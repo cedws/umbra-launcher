@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -37,6 +38,11 @@ var defaultConcurrencyLimit = runtime.NumCPU()
 var (
 	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
 	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
+)
+
+var (
+	desiredTables   = []string{"Base"}
+	undesiredTables = []string{"_TableList", "About", "PatchClient"}
 )
 
 var makeTableOnce = sync.OnceValue(func() crc32.Table {
@@ -96,6 +102,7 @@ func main() {
 		username, password               string
 		loginServerAddr, patchServerAddr string
 		patchOnly                        bool
+		fullPatch                        bool
 	)
 
 	flag.StringVar(&dir, "dir", "Wizard101", "client directory")
@@ -107,6 +114,7 @@ func main() {
 	flag.StringVar(&patchServerAddr, "patch-server", defaultPatchServer, "patch server addr")
 
 	flag.BoolVar(&patchOnly, "patch-only", false, "only patch files without logging in")
+	flag.BoolVar(&fullPatch, "full", false, "patch all game files")
 
 	flag.Parse()
 
@@ -120,6 +128,7 @@ func main() {
 		Username:         username,
 		Password:         password,
 		PatchOnly:        patchOnly,
+		FullPatch:        fullPatch,
 		LoginServerAddr:  loginServerAddr,
 		PatchServerAddr:  patchServerAddr,
 		ConcurrencyLimit: defaultConcurrencyLimit,
@@ -158,6 +167,7 @@ type launchParams struct {
 	Username         string
 	Password         string
 	PatchOnly        bool
+	FullPatch        bool
 	LoginServerAddr  string
 	PatchServerAddr  string
 	ConcurrencyLimit int
@@ -219,18 +229,32 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 	errGroup.SetLimit(p.launchParams.ConcurrencyLimit)
 
 	for _, table := range tables {
-		if table.Name == "Base" {
-			slog.Info("Processing files for table", "table", table.Name)
+		if !shouldProcessTable(table.Name, p.launchParams.FullPatch) {
+			continue
+		}
 
-			for _, record := range table.Records {
-				errGroup.Go(func() error {
-					return p.processRecord(ctx, urlPrefix, record)
-				})
-			}
+		slog.Info("Processing files for table", "table", table.Name)
+
+		for _, record := range table.Records {
+			errGroup.Go(func() error {
+				return p.processRecord(ctx, urlPrefix, record)
+			})
 		}
 	}
 
 	return errGroup.Wait()
+}
+
+func shouldProcessTable(name string, fullPatch bool) bool {
+	if !fullPatch && !slices.Contains(desiredTables, name) {
+		return false
+	}
+
+	if fullPatch && slices.Contains(undesiredTables, name) {
+		return false
+	}
+
+	return true
 }
 
 func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, record dml.Record) error {
