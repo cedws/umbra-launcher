@@ -133,19 +133,21 @@ func main() {
 type patchClient struct {
 	launchParams
 	httpClient *http.Client
-	hasherPool sync.Pool
+	hasherPool *sync.Pool
 }
 
 func newPatchClient(params launchParams) *patchClient {
+	hasherPool := sync.Pool{
+		New: func() any {
+			hasher := newReverseHasher()
+			return &hasher
+		},
+	}
+
 	return &patchClient{
 		launchParams: params,
 		httpClient:   &http.Client{},
-		hasherPool: sync.Pool{
-			New: func() any {
-				hasher := newReverseHasher()
-				return &hasher
-			},
-		},
+		hasherPool:   &hasherPool,
 	}
 }
 
@@ -269,7 +271,7 @@ func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, 
 	args := []string{
 		"-L", host, port,
 		"-U", ".." + fmt.Sprint(userID),
-		string(ck2),
+		ck2,
 		p.launchParams.Username,
 	}
 
@@ -353,7 +355,7 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 	dirname := filepath.Dir(patchFile.Target)
 
 	fulldir := filepath.Join(p.launchParams.Dir, dirname)
-	if err := os.MkdirAll(fulldir, 0755); err != nil {
+	if err := os.MkdirAll(fulldir, 0o755); err != nil {
 		return err
 	}
 
