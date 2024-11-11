@@ -5,7 +5,6 @@ go 1.23.2
 require (
 	github.com/cedws/w101-client-go v0.0.0-20241108205848-13d029f4311a
 	github.com/cedws/w101-proto-go v0.0.0-20241108201431-d1d25865844d
-	github.com/snksoft/crc v1.1.0
 	golang.org/x/sync v0.9.0
 )
 
