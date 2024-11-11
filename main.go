@@ -248,7 +248,7 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 }
 
 func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, ck2 string) error {
-	host, port, err := net.SplitHostPort(defaultLoginServer)
+	host, port, err := net.SplitHostPort(p.LoginServerAddr)
 	if err != nil {
 		return err
 	}
