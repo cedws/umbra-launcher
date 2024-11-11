@@ -174,6 +174,7 @@ type patchFile struct {
 	Source string
 	Target string
 	CRC    uint32
+	Size   uint32
 }
 
 func (p *patchClient) downloadBaseFiles(ctx context.Context) error {
@@ -217,10 +218,12 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 }
 
 func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, record dml.Record) error {
-	source := record["SrcFileName"].(string)
-	target := record["TarFileName"].(string)
-	crc := record["CRC"].(uint32)
-
+	var (
+		source = record["SrcFileName"].(string)
+		target = record["TarFileName"].(string)
+		crc    = record["CRC"].(uint32)
+		size   = record["Size"].(uint32)
+	)
 	if target == "" {
 		target = source
 	}
@@ -230,14 +233,12 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 		return err
 	}
 
-	source = filepath.Clean(source)
-	target = filepath.Clean(target)
-
 	patchFile := patchFile{
 		URL:    fileURL,
-		Source: source,
-		Target: target,
+		Source: filepath.Clean(source),
+		Target: filepath.Clean(target),
 		CRC:    crc,
+		Size:   size,
 	}
 
 	if err := p.download(ctx, patchFile); err != nil {
@@ -333,7 +334,7 @@ func (p *patchClient) download(ctx context.Context, patchFile patchFile) error {
 		return fmt.Errorf("error verifying file: %w", err)
 	}
 	if ok {
-		slog.Info("File OK", "crc", patchFile.CRC, "path", patchFile.Target)
+		slog.Info("File OK", "crc", patchFile.CRC, "size", patchFile.Size, "path", patchFile.Target)
 		return nil
 	}
 
@@ -375,11 +376,14 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	switch {
 	case os.IsNotExist(err):
 		return false, nil
-	case err != nil:
-		return false, err
+	case stat.Size() != int64(patchFile.Size):
+		// File exists but size doesn't match
+		return false, nil
 	case stat.IsDir():
 		// Remove directory which shouldn't exist
 		err = os.RemoveAll(filePath)
+		return false, err
+	case err != nil:
 		return false, err
 	default:
 		// File exists, no error
@@ -396,8 +400,6 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 		return false, err
 	}
 	actualCRC := p.hasher.Sum32()
-
-	slog.Info("File CRC", "actual", actualCRC, "expected", patchFile.CRC)
 
 	return actualCRC == patchFile.CRC, nil
 }
