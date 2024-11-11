@@ -2,6 +2,14 @@
 
 A patch client for Wizard101. It connects to the Wizard101 patch and login servers, verifies and downloads necessary files, and launches the game client.
 
+## Features
+
+* Patch without logging in with `-patch-only`
+* Patch to custom directory with `-dir`
+* Fully patch with all game files with `-full`
+* Super fast patching
+* Automatically launch the game with Wine on Linux and macOS
+
 ## Options
 
 - `-dir string`
@@ -16,3 +24,5 @@ A patch client for Wizard101. It connects to the Wizard101 patch and login serve
   - Patch server address (default "patch.us.wizard101.com:12500")
 - `-patch-only`
   - Only patch files without logging in
+- `-full`
+  - Patch all game files
