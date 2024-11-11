@@ -23,11 +23,13 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	defaultLoginServer = "login.us.wizard101.com:12000"
-	defaultPatchServer = "patch.us.wizard101.com:12500"
+	defaultLoginServer      = "login.us.wizard101.com:12000"
+	defaultPatchServer      = "patch.us.wizard101.com:12500"
+	defaultConcurrencyLimit = 8
 )
 
 var (
@@ -112,12 +114,13 @@ func main() {
 	}
 
 	params := launchParams{
-		Dir:             dir,
-		Username:        username,
-		Password:        password,
-		PatchOnly:       patchOnly,
-		LoginServerAddr: loginServerAddr,
-		PatchServerAddr: patchServerAddr,
+		Dir:              dir,
+		Username:         username,
+		Password:         password,
+		PatchOnly:        patchOnly,
+		LoginServerAddr:  loginServerAddr,
+		PatchServerAddr:  patchServerAddr,
+		ConcurrencyLimit: defaultConcurrencyLimit,
 	}
 
 	patchClient := newPatchClient(params)
@@ -130,30 +133,34 @@ func main() {
 type patchClient struct {
 	launchParams
 	httpClient *http.Client
-	hasher     *reverseHasher
+	hasherPool sync.Pool
 }
 
 func newPatchClient(params launchParams) *patchClient {
-	hasher := newReverseHasher()
-
 	return &patchClient{
 		launchParams: params,
 		httpClient:   &http.Client{},
-		hasher:       &hasher,
+		hasherPool: sync.Pool{
+			New: func() any {
+				hasher := newReverseHasher()
+				return &hasher
+			},
+		},
 	}
 }
 
 type launchParams struct {
-	Dir             string
-	Username        string
-	Password        string
-	PatchOnly       bool
-	LoginServerAddr string
-	PatchServerAddr string
+	Dir              string
+	Username         string
+	Password         string
+	PatchOnly        bool
+	LoginServerAddr  string
+	PatchServerAddr  string
+	ConcurrencyLimit int
 }
 
 func (p *patchClient) launch(ctx context.Context, params launchParams) error {
-	if err := p.downloadBaseFiles(ctx); err != nil {
+	if err := p.checkBaseFiles(ctx); err != nil {
 		return err
 	}
 
@@ -179,7 +186,7 @@ type patchFile struct {
 	Size   uint32
 }
 
-func (p *patchClient) downloadBaseFiles(ctx context.Context) error {
+func (p *patchClient) checkBaseFiles(ctx context.Context) error {
 	fileList, err := p.latestFileList(ctx)
 	if err != nil {
 		return err
@@ -204,19 +211,22 @@ func (p *patchClient) downloadBaseFiles(ctx context.Context) error {
 }
 
 func (p *patchClient) processTables(ctx context.Context, urlPrefix string, tables []dml.Table) error {
+	errGroup, ctx := errgroup.WithContext(ctx)
+	errGroup.SetLimit(p.launchParams.ConcurrencyLimit)
+
 	for _, table := range tables {
 		if table.Name == "Base" {
 			slog.Info("Processing files for table", "table", table.Name)
 
 			for _, record := range table.Records {
-				if err := p.processRecord(ctx, urlPrefix, record); err != nil {
-					return err
-				}
+				errGroup.Go(func() error {
+					return p.processRecord(ctx, urlPrefix, record)
+				})
 			}
 		}
 	}
 
-	return nil
+	return errGroup.Wait()
 }
 
 func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, record dml.Record) error {
@@ -243,7 +253,7 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 		Size:   size,
 	}
 
-	if err := p.download(ctx, patchFile); err != nil {
+	if err := p.checkFile(ctx, patchFile); err != nil {
 		return err
 	}
 
@@ -330,7 +340,7 @@ func (p *launchParams) requestCK2Token(ctx context.Context, params launchParams)
 	}
 }
 
-func (p *patchClient) download(ctx context.Context, patchFile patchFile) error {
+func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error {
 	ok, err := p.verifyFile(patchFile)
 	if err != nil {
 		return fmt.Errorf("error verifying file: %w", err)
@@ -397,11 +407,14 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	}
 	defer file.Close()
 
-	p.hasher.Reset()
-	if _, err := io.Copy(p.hasher, file); err != nil {
+	hasher := p.hasherPool.Get().(*reverseHasher)
+	defer p.hasherPool.Put(hasher)
+
+	hasher.Reset()
+	if _, err := io.Copy(hasher, file); err != nil {
 		return false, err
 	}
-	actualCRC := p.hasher.Sum32()
+	actualCRC := hasher.Sum32()
 
 	return actualCRC == patchFile.CRC, nil
 }
