@@ -129,7 +129,8 @@ func main() {
 
 type patchClient struct {
 	launchParams
-	hasher *reverseHasher
+	httpClient *http.Client
+	hasher     *reverseHasher
 }
 
 func newPatchClient(params launchParams) *patchClient {
@@ -137,6 +138,7 @@ func newPatchClient(params launchParams) *patchClient {
 
 	return &patchClient{
 		launchParams: params,
+		httpClient:   &http.Client{},
 		hasher:       &hasher,
 	}
 }
@@ -183,7 +185,7 @@ func (p *patchClient) downloadBaseFiles(ctx context.Context) error {
 		return err
 	}
 
-	fileListBin, err := request(ctx, fileList.ListFileURL)
+	fileListBin, err := p.request(ctx, fileList.ListFileURL)
 	if err != nil {
 		return err
 	}
@@ -347,7 +349,7 @@ func (p *patchClient) download(ctx context.Context, patchFile patchFile) error {
 
 	slog.Info("Downloading file", "url", patchFile.URL)
 
-	resp, err := request(ctx, patchFile.URL)
+	resp, err := p.request(ctx, patchFile.URL)
 	if err != nil {
 		return err
 	}
@@ -434,13 +436,13 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 	}
 }
 
-func request(ctx context.Context, url string) (io.ReadCloser, error) {
+func (p *patchClient) request(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
