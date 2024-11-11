@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -27,10 +28,11 @@ import (
 )
 
 const (
-	defaultLoginServer      = "login.us.wizard101.com:12000"
-	defaultPatchServer      = "patch.us.wizard101.com:12500"
-	defaultConcurrencyLimit = 8
+	defaultLoginServer = "login.us.wizard101.com:12000"
+	defaultPatchServer = "patch.us.wizard101.com:12500"
 )
+
+var defaultConcurrencyLimit = runtime.NumCPU()
 
 var (
 	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
