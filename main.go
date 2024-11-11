@@ -416,13 +416,13 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	switch {
 	case os.IsNotExist(err):
 		return false, nil
-	case stat.Size() != int64(patchFile.Size):
-		// File exists but size doesn't match
-		return false, nil
 	case stat.IsDir():
 		// Remove directory which shouldn't exist
 		err = os.RemoveAll(filePath)
 		return false, err
+	case stat.Size() != int64(patchFile.Size):
+		// File exists but size doesn't match
+		return false, nil
 	case err != nil:
 		return false, err
 	default:
