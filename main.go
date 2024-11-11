@@ -259,9 +259,17 @@ func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, 
 		string(ck2),
 		p.launchParams.Username,
 	}
-	slog.Info("Launching WizardGraphicalClient.exe", "args", args)
 
-	cmd := exec.CommandContext(ctx, "./WizardGraphicalClient.exe", args...)
+	name := "./WizardGraphicalClient.exe"
+	if launchWithWine {
+		slog.Info("Detected platform not windows, launching with wine")
+		args = append([]string{name}, args...)
+		name = "wine"
+	}
+
+	slog.Info("Launching", "bin", name, "args", args)
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = filepath.Join(p.launchParams.Dir, "Bin")
 
 	return cmd.Start()
