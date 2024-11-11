@@ -378,7 +378,9 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	case err != nil:
 		return false, err
 	case stat.IsDir():
-		return false, nil
+		// Remove directory which shouldn't exist
+		err = os.RemoveAll(filePath)
+		return false, err
 	default:
 		// File exists, no error
 	}
