@@ -33,6 +33,10 @@ const (
 	defaultPatchServer = "patch.us.wizard101.com:12500"
 )
 
+const (
+	fileTypeDynamicWAD = 5
+)
+
 var defaultConcurrencyLimit = runtime.NumCPU()
 
 var (
@@ -259,13 +263,21 @@ func shouldProcessTable(name string, fullPatch bool) bool {
 
 func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, record dml.Record) error {
 	var (
-		source = record["SrcFileName"].(string)
-		target = record["TarFileName"].(string)
-		crc    = record["CRC"].(uint32)
-		size   = record["Size"].(uint32)
+		source   = record["SrcFileName"].(string)
+		target   = record["TarFileName"].(string)
+		crc      = record["CRC"].(uint32)
+		size     = record["Size"].(uint32)
+		fileType = record["FileType"].(uint32)
 	)
 	if target == "" {
 		target = source
+	}
+
+	// Don't patch dynamic WADs unless in full patch mode, they won't
+	// match the expected CRC since they're loaded in segments at runtime
+	if !p.launchParams.FullPatch && fileType == fileTypeDynamicWAD {
+		slog.Info("Skipping dynamic WAD", "file", target)
+		return nil
 	}
 
 	fileURL, err := url.JoinPath(urlPrefix, source)
