@@ -494,6 +494,7 @@ func (p *patchClient) request(ctx context.Context, url string) (io.ReadCloser, e
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", "KingsIsle Patcher")
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -501,7 +502,7 @@ func (p *patchClient) request(ctx context.Context, url string) (io.ReadCloser, e
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code for url %s: %d", url, resp.StatusCode)
 	}
 
 	return resp.Body, err

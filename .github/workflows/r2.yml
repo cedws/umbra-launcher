@@ -1,0 +1,32 @@
+name: Run R2 upload
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
+
+      - name: Download
+        run: just run -patch-only -dir Wizard101
+
+      - name: Set version
+        run: echo "WIZARD101_REVISION=$(cat Wizard101/Bin/revision.dat)" >> $GITHUB_ENV
+
+      - name: Sync
+        env:
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        run: aws s3 cp --region weur --recursive --endpoint-url https://394cb23f1dbebe9dabf6bda93f01727e.r2.cloudflarestorage.com Wizard101 s3://wizard101/$WIZARD101_REVISION
