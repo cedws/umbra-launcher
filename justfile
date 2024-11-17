@@ -1,7 +1,9 @@
+set positional-arguments
+
 all: build
 
 run *args:
-    go run ./... {{ args }}
+    go run ./... "$@"
 
 build:
     go build ./...
