@@ -1,3 +1,3 @@
-package main
+package umbra
 
 const launchWithWine = false
