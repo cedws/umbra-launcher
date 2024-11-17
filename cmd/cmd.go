@@ -44,7 +44,7 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	if len(os.Args) != 1 {
+	if len(flag.Args()) > 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
