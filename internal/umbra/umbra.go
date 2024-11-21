@@ -262,21 +262,31 @@ func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, 
 	}
 
 	name := "./WizardGraphicalClient.exe"
-	if launchWithWine {
-		slog.Info("Detected platform not windows, launching with wine")
-		args = append([]string{name}, args...)
-		name = "wine"
+	dir := filepath.Join(p.LaunchParams.Dir, "Bin")
+
+	if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
+		return fmt.Errorf("WizardGraphicalClient.exe not found, patching required")
 	}
 
-	slog.Info("Launching", "bin", name, "args", args)
+	if launchWithWine {
+		slog.Info("Detected platform not Windows, launching with Wine")
+		args = append([]string{name}, args...)
+		name = "wine"
+
+		if _, err := exec.LookPath(name); err != nil {
+			return fmt.Errorf("Wine executable not found in PATH")
+		}
+	}
+
+	slog.Info("Launching", "cmd", name, "args", args)
 
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = filepath.Join(p.LaunchParams.Dir, "Bin")
+	cmd.Dir = dir
 
 	return cmd.Start()
 }
 
-func (p *LaunchParams) requestCK2Token(ctx context.Context, params LaunchParams) (uint64, string, error) {
+func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) (uint64, string, error) {
 	authenRspCh := make(chan login.UserAuthenRsp)
 
 	r := proto.NewMessageRouter()
