@@ -369,8 +369,19 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 	}
 	defer file.Close()
 
-	if _, err := io.Copy(file, resp); err != nil {
+	hasher := p.hasherPool.Get().(*reverseHasher)
+	defer p.hasherPool.Put(hasher)
+
+	hasher.Reset()
+
+	teeReader := io.TeeReader(resp, hasher)
+	if _, err := io.Copy(file, teeReader); err != nil {
 		return err
+	}
+
+	actualCRC := hasher.Sum32()
+	if actualCRC != patchFile.CRC {
+		return fmt.Errorf("crc mismatch for file %s: expected %d, got %d", patchFile.Target, patchFile.CRC, actualCRC)
 	}
 
 	return nil
