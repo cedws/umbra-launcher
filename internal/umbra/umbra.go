@@ -22,6 +22,7 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
+	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -108,6 +109,7 @@ type patchClient struct {
 	LaunchParams
 	httpClient *http.Client
 	hasherPool *sync.Pool
+	fs         afero.Fs
 }
 
 func newPatchClient(params LaunchParams) *patchClient {
@@ -122,6 +124,7 @@ func newPatchClient(params LaunchParams) *patchClient {
 		LaunchParams: params,
 		httpClient:   &http.Client{},
 		hasherPool:   &hasherPool,
+		fs:           afero.NewBasePathFs(afero.NewOsFs(), params.Dir),
 	}
 }
 
@@ -262,9 +265,8 @@ func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, 
 	}
 
 	name := "./WizardGraphicalClient.exe"
-	dir := filepath.Join(p.LaunchParams.Dir, "Bin")
 
-	if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
+	if _, err := p.fs.Open(filepath.Join("Bin", name)); os.IsNotExist(err) {
 		return fmt.Errorf("WizardGraphicalClient.exe not found, patching required")
 	}
 
@@ -281,7 +283,7 @@ func (p *patchClient) launchGraphicalClient(ctx context.Context, userID uint64, 
 	slog.Info("Launching", "cmd", name, "args", args)
 
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
+	cmd.Dir = filepath.Join(p.LaunchParams.Dir, "Bin")
 
 	return cmd.Start()
 }
@@ -349,9 +351,7 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 	}
 
 	dirname := filepath.Dir(patchFile.Target)
-
-	fulldir := filepath.Join(p.LaunchParams.Dir, dirname)
-	if err := os.MkdirAll(fulldir, 0o755); err != nil {
+	if err := p.fs.MkdirAll(dirname, 0o755); err != nil {
 		return err
 	}
 
@@ -363,9 +363,7 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 	}
 	defer resp.Close()
 
-	filePath := filepath.Join(p.LaunchParams.Dir, patchFile.Target)
-
-	file, err := os.Create(filePath)
+	file, err := p.fs.Create(patchFile.Target)
 	if err != nil {
 		return err
 	}
@@ -379,16 +377,16 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 }
 
 func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
-	filePath := filepath.Join(p.LaunchParams.Dir, patchFile.Target)
+	filePath := patchFile.Target
 	slog.Info("Verifying file", "path", filePath)
 
-	stat, err := os.Stat(filePath)
+	stat, err := p.fs.Stat(filePath)
 	switch {
 	case os.IsNotExist(err):
 		return false, nil
 	case stat.IsDir():
 		// Remove directory which shouldn't exist
-		err = os.RemoveAll(filePath)
+		err = p.fs.RemoveAll(filePath)
 		return false, err
 	case stat.Size() != int64(patchFile.Size):
 		// File exists but size doesn't match
@@ -399,7 +397,7 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 		// File exists, no error
 	}
 
-	file, err := os.Open(filePath)
+	file, err := p.fs.Open(filePath)
 	if err != nil {
 		return false, err
 	}
