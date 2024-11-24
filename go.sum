@@ -1,7 +1,7 @@
-github.com/cedws/w101-client-go v0.0.0-20241117141549-1bd3b81e980f h1:1FIoTN84PNCg+e6y0MM+cUyVIxXrxZQzz/ojY1r+haM=
-github.com/cedws/w101-client-go v0.0.0-20241117141549-1bd3b81e980f/go.mod h1:LEEZPLzH2mdzndxQPSwg+7ho+Q1U+raLB6802UUvLzQ=
-github.com/cedws/w101-proto-go v0.0.0-20241117141803-d54f3d276cee h1:LYB5DpljfGvJZUi4lbOZfAUATfW5d+kCef/uByRbdQ0=
-github.com/cedws/w101-proto-go v0.0.0-20241117141803-d54f3d276cee/go.mod h1:Xkfd1lWc3cwpzAFCK1O5DbyAoUyMl3L17BQT1PWL3Dk=
+github.com/cedws/w101-client-go v0.0.0-20241123173053-55f04ec15974 h1:Fx2aXEem14v++PJENRDHS1ab1C8rgSxNXT7RF2gQL7Y=
+github.com/cedws/w101-client-go v0.0.0-20241123173053-55f04ec15974/go.mod h1:LEEZPLzH2mdzndxQPSwg+7ho+Q1U+raLB6802UUvLzQ=
+github.com/cedws/w101-proto-go v0.0.0-20241123173233-29fff1fc3bae h1:rCpDIzm/BK68zMKEaYCPzcme3e9YXR0PouHjsZ5VzEM=
+github.com/cedws/w101-proto-go v0.0.0-20241123173233-29fff1fc3bae/go.mod h1:txaQ4U+DqZHIFvn2q7DLiT1kEtKk6VGy8WmFd/l1lbs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

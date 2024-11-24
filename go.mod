@@ -3,8 +3,8 @@ module github.com/cedws/umbra-launcher
 go 1.23.2
 
 require (
-	github.com/cedws/w101-client-go v0.0.0-20241117141549-1bd3b81e980f
-	github.com/cedws/w101-proto-go v0.0.0-20241117141803-d54f3d276cee
+	github.com/cedws/w101-client-go v0.0.0-20241123173053-55f04ec15974
+	github.com/cedws/w101-proto-go v0.0.0-20241123173233-29fff1fc3bae
 	github.com/spf13/afero v1.11.0
 	golang.org/x/sync v0.9.0
 )
