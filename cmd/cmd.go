@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"runtime"
 
@@ -61,6 +61,7 @@ func Execute() {
 	}
 
 	if err := umbra.Patch(context.Background(), params); err != nil {
-		log.Fatal(err)
+		slog.Error("Error during patch", "error", err)
+		os.Exit(1)
 	}
 }

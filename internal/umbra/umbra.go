@@ -22,11 +22,13 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
+	"github.com/saferwall/pe"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 )
 
 const (
+	fileTypeExecutable = 4
 	fileTypeDynamicWAD = 5
 )
 
@@ -39,6 +41,14 @@ var (
 	desiredTables   = []string{"Base"}
 	undesiredTables = []string{"_TableList", "About", "PatchClient"}
 )
+
+// List of files with a verifiable authenticode signature
+// Most other files are signed by an expired certificate, so they have to be ignored :(
+var verifiableFiles = []string{
+	"Bin\\BugReportBuilderCSR.dll",
+	"Bin\\BugReporter.exe",
+	"Bin\\WizardGraphicalClient.exe",
+}
 
 var makeTableOnce = sync.OnceValue(func() crc32.Table {
 	polyReversed := bits.Reverse32(0x4C11DB7)
@@ -133,6 +143,8 @@ func (p *patchClient) launch(ctx context.Context, params LaunchParams) error {
 		return err
 	}
 
+	slog.Info("All files OK")
+
 	if !params.PatchOnly {
 		userID, ck2, err := p.requestCK2Token(ctx, params)
 		if err != nil {
@@ -153,6 +165,7 @@ type patchFile struct {
 	Target string
 	CRC    uint32
 	Size   uint32
+	Type   uint32
 }
 
 func (p *patchClient) checkBaseFiles(ctx context.Context) error {
@@ -226,7 +239,7 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 
 	// Don't patch dynamic WADs unless in full patch mode, they won't
 	// match the expected CRC since they're loaded in segments at runtime
-	if !p.LaunchParams.FullPatch && fileType == fileTypeDynamicWAD {
+	if fileType == fileTypeDynamicWAD && !p.LaunchParams.FullPatch {
 		slog.Info("Skipping dynamic WAD", "file", target)
 		return nil
 	}
@@ -242,11 +255,20 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 		Target: filepath.Clean(target),
 		CRC:    crc,
 		Size:   size,
+		Type:   fileType,
 	}
 
-	if err := p.checkFile(ctx, patchFile); err != nil {
-		return err
+	ok, err := p.verifyFileCRC(patchFile)
+	if err != nil {
+		return fmt.Errorf("error verifying file: %w", err)
 	}
+	if !ok {
+		if err := p.downloadFile(ctx, patchFile); err != nil {
+			return fmt.Errorf("error downloading file: %w", err)
+		}
+	}
+
+	slog.Info("File OK", "crc", patchFile.CRC, "size", patchFile.Size, "path", patchFile.Target)
 
 	return nil
 }
@@ -294,6 +316,9 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 	r := proto.NewMessageRouter()
 	login.RegisterLoginService(r, &loginHandler{authenRspCh: authenRspCh})
 
+	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutAuthenRsp)
+	defer cancel()
+
 	protoClient, err := proto.Dial(ctx, params.LoginServerAddr, r)
 	if err != nil {
 		return 0, "", err
@@ -324,9 +349,6 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 		return 0, "", err
 	}
 
-	ctx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errTimeoutAuthenRsp)
-	defer cancel()
-
 	select {
 	case rsp := <-authenRspCh:
 		if rsp.Error != 0 {
@@ -340,19 +362,21 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 	}
 }
 
-func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error {
-	ok, err := p.verifyFile(patchFile)
-	if err != nil {
-		return fmt.Errorf("error verifying file: %w", err)
-	}
-	if ok {
-		slog.Info("File OK", "crc", patchFile.CRC, "size", patchFile.Size, "path", patchFile.Target)
-		return nil
-	}
-
+func (p *patchClient) downloadFile(ctx context.Context, patchFile patchFile) error {
 	dirname := filepath.Dir(patchFile.Target)
 	if err := p.fs.MkdirAll(dirname, 0o755); err != nil {
 		return err
+	}
+
+	file, err := p.fs.Create(patchFile.Target)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	closeAndRemove := func() {
+		file.Close()
+		p.fs.Remove(patchFile.Target)
 	}
 
 	slog.Info("Downloading file", "url", patchFile.URL)
@@ -363,31 +387,62 @@ func (p *patchClient) checkFile(ctx context.Context, patchFile patchFile) error 
 	}
 	defer resp.Close()
 
-	file, err := p.fs.Create(patchFile.Target)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
 	hasher := p.hasherPool.Get().(*reverseHasher)
-	defer p.hasherPool.Put(hasher)
-
 	hasher.Reset()
 
+	defer p.hasherPool.Put(hasher)
+
+	// Tee into hasher to calculate CRC while writing to file
 	teeReader := io.TeeReader(resp, hasher)
-	if _, err := io.Copy(file, teeReader); err != nil {
+	if _, err := io.CopyN(file, teeReader, int64(patchFile.Size)); err != nil {
 		return err
 	}
 
 	actualCRC := hasher.Sum32()
 	if actualCRC != patchFile.CRC {
+		closeAndRemove()
 		return fmt.Errorf("crc mismatch for file %s: expected %d, got %d", patchFile.Target, patchFile.CRC, actualCRC)
+	}
+
+	if patchFile.Type == fileTypeExecutable && slices.Contains(verifiableFiles, patchFile.Target) {
+		if err := p.verifyFileAuthenticode(patchFile); err != nil {
+			closeAndRemove()
+			return fmt.Errorf("error verifying file %s: %w", patchFile.Target, err)
+		}
+
+		slog.Info("Authenticode verification passed", "path", patchFile.Target)
 	}
 
 	return nil
 }
 
-func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
+func (p *patchClient) verifyFileAuthenticode(patchFile patchFile) error {
+	peBytes, err := afero.ReadFile(p.fs, patchFile.Target)
+	if err != nil {
+		return err
+	}
+
+	// Would be preferable to use p.New where it mmaps the given file path
+	// but building the full path wouldn't be necessarily confined to the afero.Fs
+	pe, err := pe.NewBytes(peBytes, nil)
+	if err != nil {
+		return err
+	}
+
+	if err := pe.Parse(); err != nil {
+		return err
+	}
+
+	for _, cert := range pe.Certificates.Certificates {
+		if !cert.SignatureValid || !cert.Verified {
+			return fmt.Errorf("authenticode verification failed")
+		}
+	}
+
+	return nil
+}
+
+func (p *patchClient) verifyFileCRC(patchFile patchFile) (bool, error) {
 	filePath := patchFile.Target
 	slog.Info("Verifying file", "path", filePath)
 
@@ -415,10 +470,11 @@ func (p *patchClient) verifyFile(patchFile patchFile) (bool, error) {
 	defer file.Close()
 
 	hasher := p.hasherPool.Get().(*reverseHasher)
+	hasher.Reset()
+
 	defer p.hasherPool.Put(hasher)
 
-	hasher.Reset()
-	if _, err := io.Copy(hasher, file); err != nil {
+	if _, err := io.CopyN(hasher, file, int64(patchFile.Size)); err != nil {
 		return false, err
 	}
 	actualCRC := hasher.Sum32()
@@ -432,6 +488,9 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 	r := proto.NewMessageRouter()
 	patch.RegisterPatchService(r, &patchHandler{fileListCh: fileListCh})
 
+	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutFileList)
+	defer cancel()
+
 	protoClient, err := proto.Dial(ctx, p.LaunchParams.PatchServerAddr, r)
 	if err != nil {
 		return nil, err
@@ -444,9 +503,6 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 	if err := c.LatestFileListV2(&patch.LatestFileListV2{}); err != nil {
 		return nil, err
 	}
-
-	ctx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errTimeoutFileList)
-	defer cancel()
 
 	select {
 	case fileList := <-fileListCh:
