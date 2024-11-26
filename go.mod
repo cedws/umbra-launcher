@@ -7,15 +7,15 @@ require (
 	github.com/cedws/w101-proto-go v0.0.0-20241123173233-29fff1fc3bae
 	github.com/saferwall/pe v1.5.5
 	github.com/spf13/afero v1.11.0
+	go.mozilla.org/pkcs7 v0.9.0
 	golang.org/x/sync v0.9.0
 )
 
 require (
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
 	github.com/secDre4mer/pkcs7 v0.0.0-20240322103146-665324a4461d // indirect
-	github.com/stretchr/testify v1.7.0 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
-	golang.org/x/sys v0.15.0 // indirect
+	github.com/stretchr/testify v1.8.4 // indirect
+	golang.org/x/crypto v0.19.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

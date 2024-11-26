@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -22,7 +23,6 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
-	"github.com/saferwall/pe"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 )
@@ -42,12 +42,11 @@ var (
 	undesiredTables = []string{"_TableList", "About", "PatchClient"}
 )
 
-// List of files with a verifiable authenticode signature
-// Most other files are signed by an expired certificate, so they have to be ignored :(
-var verifiableFiles = []string{
-	"Bin\\BugReportBuilderCSR.dll",
-	"Bin\\BugReporter.exe",
-	"Bin\\WizardGraphicalClient.exe",
+// List of files with no authenticode signature
+// Most other files are signed by an expired certificate
+var unverifiableFiles = []string{
+	"Bin/mss64.dll",
+	"Bin/mss64midi.dll",
 }
 
 var makeTableOnce = sync.OnceValue(func() crc32.Table {
@@ -251,8 +250,8 @@ func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, recor
 
 	patchFile := patchFile{
 		URL:    fileURL,
-		Source: filepath.Clean(source),
-		Target: filepath.Clean(target),
+		Source: path.Clean(source),
+		Target: path.Clean(target),
 		CRC:    crc,
 		Size:   size,
 		Type:   fileType,
@@ -404,7 +403,7 @@ func (p *patchClient) downloadFile(ctx context.Context, patchFile patchFile) err
 		return fmt.Errorf("crc mismatch for file %s: expected %d, got %d", patchFile.Target, patchFile.CRC, actualCRC)
 	}
 
-	if patchFile.Type == fileTypeExecutable && slices.Contains(verifiableFiles, patchFile.Target) {
+	if patchFile.Type == fileTypeExecutable && !slices.Contains(unverifiableFiles, patchFile.Target) {
 		if err := p.verifyFileAuthenticode(patchFile); err != nil {
 			closeAndRemove()
 			return fmt.Errorf("error verifying file %s: %w", patchFile.Target, err)
@@ -422,24 +421,7 @@ func (p *patchClient) verifyFileAuthenticode(patchFile patchFile) error {
 		return err
 	}
 
-	// Would be preferable to use p.New where it mmaps the given file path
-	// but building the full path wouldn't be necessarily confined to the afero.Fs
-	pe, err := pe.NewBytes(peBytes, nil)
-	if err != nil {
-		return err
-	}
-
-	if err := pe.Parse(); err != nil {
-		return err
-	}
-
-	for _, cert := range pe.Certificates.Certificates {
-		if !cert.SignatureValid || !cert.Verified {
-			return fmt.Errorf("authenticode verification failed")
-		}
-	}
-
-	return nil
+	return verifyAuthenticode(peBytes)
 }
 
 func (p *patchClient) verifyFileCRC(patchFile patchFile) (bool, error) {
