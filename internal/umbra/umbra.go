@@ -32,6 +32,8 @@ const (
 	fileTypeDynamicWAD = 5
 )
 
+const loginServerRetries = 10
+
 var (
 	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
 	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
@@ -313,15 +315,28 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 	authenRspCh := make(chan login.UserAuthenRsp)
 
 	r := proto.NewMessageRouter()
-	login.RegisterLoginService(r, &loginHandler{authenRspCh: authenRspCh})
+	login.RegisterLoginService(&r, &loginHandler{authenRspCh: authenRspCh})
 
 	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutAuthenRsp)
 	defer cancel()
 
-	protoClient, err := proto.Dial(ctx, params.LoginServerAddr, r)
+	var (
+		protoClient *proto.Client
+		err         error
+	)
+
+	// Temporary workaround for KI login server issues
+	// For some reason they're dropping connections every so often
+	for range loginServerRetries {
+		protoClient, err = proto.Dial(ctx, params.LoginServerAddr, &r)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return 0, "", err
 	}
+
 	defer protoClient.Close()
 
 	slog.Info("Connected to login server", "server", params.LoginServerAddr)
@@ -468,12 +483,12 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 	fileListCh := make(chan patch.LatestFileListV2)
 
 	r := proto.NewMessageRouter()
-	patch.RegisterPatchService(r, &patchHandler{fileListCh: fileListCh})
+	patch.RegisterPatchService(&r, &patchHandler{fileListCh: fileListCh})
 
 	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutFileList)
 	defer cancel()
 
-	protoClient, err := proto.Dial(ctx, p.LaunchParams.PatchServerAddr, r)
+	protoClient, err := proto.Dial(ctx, p.LaunchParams.PatchServerAddr, &r)
 	if err != nil {
 		return nil, err
 	}
