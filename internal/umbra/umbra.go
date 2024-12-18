@@ -1,6 +1,7 @@
 package umbra
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"hash/crc32"
@@ -39,10 +40,7 @@ var (
 	errTimeoutFileList  = fmt.Errorf("timed out waiting for latest file list")
 )
 
-var (
-	desiredTables   = []string{"Base"}
-	undesiredTables = []string{"_TableList", "About", "PatchClient"}
-)
+var metaTables = []string{"_TableList", "About", "PatchClient"}
 
 // List of files with no authenticode signature
 // Most other files are signed by an expired certificate
@@ -112,18 +110,72 @@ type LaunchParams struct {
 }
 
 func Patch(ctx context.Context, params LaunchParams) error {
-	patchClient := newPatchClient(params)
+	patchClient, err := newPatchClient(params)
+	if err != nil {
+		return err
+	}
+	defer patchClient.Close()
+
 	return patchClient.launch(ctx, params)
+}
+
+type packagesList struct {
+	afero.File
+	packages []string
+}
+
+func (l *packagesList) Open(fs afero.Fs) error {
+	file, err := fs.OpenFile("LocalPackagesList.txt", os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	l.File = file
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		l.packages = append(l.packages, scanner.Text())
+	}
+
+	for _, pkg := range l.packages {
+		slog.Info("Detected package", "package", pkg)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (l *packagesList) Add(pkg string) {
+	if !l.Contains(pkg) {
+		l.packages = append(l.packages, pkg)
+		l.WriteString(pkg + "\n")
+	}
+}
+
+func (l *packagesList) Contains(pkg string) bool {
+	// Special case: Base table should always be processed
+	// but not be present in the packages list
+	if pkg == "Base" {
+		return true
+	}
+	return slices.Contains(l.packages, pkg)
+}
+
+func (l *packagesList) Close() error {
+	return l.File.Close()
 }
 
 type patchClient struct {
 	LaunchParams
-	httpClient *http.Client
-	hasherPool *sync.Pool
-	fs         afero.Fs
+	httpClient   *http.Client
+	hasherPool   *sync.Pool
+	fs           afero.Fs
+	packagesList packagesList
 }
 
-func newPatchClient(params LaunchParams) *patchClient {
+func newPatchClient(params LaunchParams) (*patchClient, error) {
 	hasherPool := sync.Pool{
 		New: func() any {
 			hasher := newReverseHasher()
@@ -131,12 +183,25 @@ func newPatchClient(params LaunchParams) *patchClient {
 		},
 	}
 
+	os.MkdirAll(params.Dir, 0o755)
+	fs := afero.NewBasePathFs(afero.NewOsFs(), params.Dir)
+
+	var packagesList packagesList
+	if err := packagesList.Open(fs); err != nil {
+		return nil, fmt.Errorf("error opening packages list: %w", err)
+	}
+
 	return &patchClient{
 		LaunchParams: params,
 		httpClient:   &http.Client{},
 		hasherPool:   &hasherPool,
-		fs:           afero.NewBasePathFs(afero.NewOsFs(), params.Dir),
-	}
+		fs:           fs,
+		packagesList: packagesList,
+	}, nil
+}
+
+func (p *patchClient) Close() error {
+	return p.packagesList.Close()
 }
 
 func (p *patchClient) launch(ctx context.Context, params LaunchParams) error {
@@ -198,7 +263,7 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 	errGroup.SetLimit(p.LaunchParams.ConcurrencyLimit)
 
 	for _, table := range tables {
-		if !shouldProcessTable(table.Name, p.LaunchParams.FullPatch) {
+		if !p.shouldProcessTable(table.Name) {
 			continue
 		}
 
@@ -209,21 +274,31 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 				return p.processRecord(ctx, urlPrefix, record)
 			})
 		}
+
+		// Adding it to the packages list here is a bit premature but it won't hurt
+		p.packagesList.Add(table.Name)
 	}
 
 	return errGroup.Wait()
 }
 
-func shouldProcessTable(name string, fullPatch bool) bool {
-	if !fullPatch && !slices.Contains(desiredTables, name) {
+func (p *patchClient) shouldProcessTable(name string) bool {
+	// Skip meta tables
+	if slices.Contains(metaTables, name) {
 		return false
 	}
 
-	if fullPatch && slices.Contains(undesiredTables, name) {
-		return false
+	// User requested full patch, process all tables
+	if p.LaunchParams.FullPatch {
+		return true
 	}
 
-	return true
+	// Package has been downloaded, verify it
+	if p.packagesList.Contains(name) {
+		return true
+	}
+
+	return false
 }
 
 func (p *patchClient) processRecord(ctx context.Context, urlPrefix string, record dml.Record) error {
