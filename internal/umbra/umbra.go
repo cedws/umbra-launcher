@@ -3,6 +3,7 @@ package umbra
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -184,7 +185,9 @@ func newPatchClient(params LaunchParams) (*patchClient, error) {
 	}
 
 	os.MkdirAll(params.Dir, 0o755)
+
 	fs := afero.NewBasePathFs(afero.NewOsFs(), params.Dir)
+	fs.MkdirAll("PatchInfo", 0o755)
 
 	var packagesList packagesList
 	if err := packagesList.Open(fs); err != nil {
@@ -258,6 +261,53 @@ func (p *patchClient) checkBaseFiles(ctx context.Context) error {
 	return nil
 }
 
+func createCRCFile(fs afero.Fs, name string) (afero.File, error) {
+	return fs.Create(fmt.Sprintf("PatchInfo/CRC_%v.dat", name))
+}
+
+func (p *patchClient) writeCRCRecord(file afero.File, record dml.Record) error {
+	hasher := p.hasherPool.Get().(*reverseHasher)
+	hasher.Reset()
+
+	defer p.hasherPool.Put(hasher)
+
+	var (
+		source = record["SrcFileName"].(string)
+		crc    = record["CRC"].(uint32)
+		size   = record["Size"].(uint32)
+	)
+
+	hasher.Write([]byte(source))
+
+	var (
+		fileNameCRC = hasher.Sum32()
+		timestamp   = time.Now().UnixMilli()
+	)
+
+	if err := binary.Write(file, binary.LittleEndian, fileNameCRC); err != nil {
+		return err
+	}
+
+	if err := binary.Write(file, binary.LittleEndian, size); err != nil {
+		return err
+	}
+
+	if err := binary.Write(file, binary.LittleEndian, crc); err != nil {
+		return err
+	}
+
+	// Write 4 null bytes
+	if err := binary.Write(file, binary.LittleEndian, uint32(0)); err != nil {
+		return err
+	}
+
+	if err := binary.Write(file, binary.LittleEndian, uint64(timestamp)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (p *patchClient) processTables(ctx context.Context, urlPrefix string, tables []dml.Table) error {
 	errGroup, ctx := errgroup.WithContext(ctx)
 	errGroup.SetLimit(p.LaunchParams.ConcurrencyLimit)
@@ -267,11 +317,24 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 			continue
 		}
 
+		crcFile, err := createCRCFile(p.fs, table.Name)
+		if err != nil {
+			return err
+		}
+
 		slog.Info("Processing files for table", "table", table.Name)
 
 		for _, record := range table.Records {
 			errGroup.Go(func() error {
-				return p.processRecord(ctx, urlPrefix, record)
+				if err := p.processRecord(ctx, urlPrefix, record); err != nil {
+					return fmt.Errorf("error processing record: %w", err)
+				}
+
+				if err := p.writeCRCRecord(crcFile, record); err != nil {
+					return fmt.Errorf("error writing CRC record: %w", err)
+				}
+
+				return nil
 			})
 		}
 
