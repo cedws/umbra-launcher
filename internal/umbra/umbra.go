@@ -121,7 +121,7 @@ func Patch(ctx context.Context, params LaunchParams) error {
 }
 
 type packagesList struct {
-	afero.File
+	wc       io.WriteCloser
 	packages []string
 }
 
@@ -130,7 +130,7 @@ func (l *packagesList) Open(fs afero.Fs) error {
 	if err != nil {
 		return err
 	}
-	l.File = file
+	l.wc = file
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -151,7 +151,7 @@ func (l *packagesList) Open(fs afero.Fs) error {
 func (l *packagesList) Add(pkg string) {
 	if !l.Contains(pkg) {
 		l.packages = append(l.packages, pkg)
-		l.WriteString(pkg + "\n")
+		l.wc.Write([]byte(pkg + "\n"))
 	}
 }
 
@@ -165,7 +165,7 @@ func (l *packagesList) Contains(pkg string) bool {
 }
 
 func (l *packagesList) Close() error {
-	return l.File.Close()
+	return l.wc.Close()
 }
 
 type patchClient struct {
@@ -243,13 +243,7 @@ func (p *patchClient) checkBaseFiles(ctx context.Context) error {
 		return err
 	}
 
-	fileListBin, err := p.request(ctx, fileList.ListFileURL)
-	if err != nil {
-		return err
-	}
-	defer fileListBin.Close()
-
-	dmlTables, err := dml.DecodeTable(fileListBin)
+	dmlTables, err := p.fileListTables(ctx, fileList)
 	if err != nil {
 		return err
 	}
@@ -261,11 +255,33 @@ func (p *patchClient) checkBaseFiles(ctx context.Context) error {
 	return nil
 }
 
-func createCRCFile(fs afero.Fs, name string) (afero.File, error) {
+func (p *patchClient) fileListTables(ctx context.Context, fileList *patch.LatestFileListV2) (*[]dml.Table, error) {
+	fileListBin, err := p.request(ctx, fileList.ListFileURL)
+	if err != nil {
+		return nil, err
+	}
+	defer fileListBin.Close()
+
+	cacheFile, err := createLatestFileList(p.fs)
+	if err != nil {
+		return nil, err
+	}
+	defer cacheFile.Close()
+
+	cacheTee := io.TeeReader(fileListBin, cacheFile)
+
+	return dml.DecodeTable(cacheTee)
+}
+
+func createLatestFileList(fs afero.Fs) (io.WriteCloser, error) {
+	return fs.Create("PatchInfo/LatestFileList.bin")
+}
+
+func createCRCFile(fs afero.Fs, name string) (io.WriteCloser, error) {
 	return fs.Create(fmt.Sprintf("PatchInfo/CRC_%v.dat", name))
 }
 
-func (p *patchClient) writeCRCRecord(file afero.File, record dml.Record) error {
+func (p *patchClient) writeCRCRecord(w io.Writer, record dml.Record) error {
 	hasher := p.hasherPool.Get().(*reverseHasher)
 	hasher.Reset()
 
@@ -284,28 +300,19 @@ func (p *patchClient) writeCRCRecord(file afero.File, record dml.Record) error {
 		timestamp   = time.Now().UnixMilli()
 	)
 
-	if err := binary.Write(file, binary.LittleEndian, fileNameCRC); err != nil {
-		return err
+	var bytes []byte
+	bytes = binary.LittleEndian.AppendUint32(bytes, fileNameCRC)
+	bytes = binary.LittleEndian.AppendUint32(bytes, size)
+	bytes = binary.LittleEndian.AppendUint32(bytes, crc)
+	bytes = binary.LittleEndian.AppendUint32(bytes, 0)
+	bytes = binary.LittleEndian.AppendUint64(bytes, uint64(timestamp))
+
+	if len(bytes) != 24 {
+		panic("expected 24 bytes for crc record")
 	}
 
-	if err := binary.Write(file, binary.LittleEndian, size); err != nil {
-		return err
-	}
-
-	if err := binary.Write(file, binary.LittleEndian, crc); err != nil {
-		return err
-	}
-
-	// Write 4 null bytes
-	if err := binary.Write(file, binary.LittleEndian, uint32(0)); err != nil {
-		return err
-	}
-
-	if err := binary.Write(file, binary.LittleEndian, uint64(timestamp)); err != nil {
-		return err
-	}
-
-	return nil
+	_, err := w.Write(bytes)
+	return err
 }
 
 func (p *patchClient) processTables(ctx context.Context, urlPrefix string, tables []dml.Table) error {
@@ -321,6 +328,7 @@ func (p *patchClient) processTables(ctx context.Context, urlPrefix string, table
 		if err != nil {
 			return err
 		}
+		defer crcFile.Close()
 
 		slog.Info("Processing files for table", "table", table.Name)
 
