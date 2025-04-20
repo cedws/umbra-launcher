@@ -1,6 +1,6 @@
 module github.com/cedws/umbra-launcher
 
-go 1.23.2
+go 1.24.2
 
 require (
 	github.com/cedws/w101-client-go v0.0.0-20241127195155-593f54c07de7
