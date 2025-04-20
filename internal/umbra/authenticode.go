@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/saferwall/pe"
-	"go.mozilla.org/pkcs7"
+	"github.com/smallstep/pkcs7"
 )
 
 //go:embed certs.pem
