@@ -564,25 +564,7 @@ func (p *patchClient) downloadFile(ctx context.Context, patchFile patchFile) err
 		return fmt.Errorf("crc mismatch for file %s: expected %d, got %d", patchFile.Target, patchFile.CRC, actualCRC)
 	}
 
-	if patchFile.Type == fileTypeExecutable && !slices.Contains(unverifiableFiles, patchFile.Target) {
-		if err := p.verifyFileAuthenticode(patchFile); err != nil {
-			closeAndRemove()
-			return fmt.Errorf("error verifying file %s: %w", patchFile.Target, err)
-		}
-
-		slog.Info("Authenticode verification passed", "path", patchFile.Target)
-	}
-
 	return nil
-}
-
-func (p *patchClient) verifyFileAuthenticode(patchFile patchFile) error {
-	peBytes, err := afero.ReadFile(p.fs, patchFile.Target)
-	if err != nil {
-		return err
-	}
-
-	return verifyAuthenticode(peBytes)
 }
 
 func (p *patchClient) verifyFileCRC(patchFile patchFile) (bool, error) {
