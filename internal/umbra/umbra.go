@@ -82,7 +82,7 @@ func (h *reverseHasher) Reset() {
 }
 
 type patchHandler struct {
-	patch.PatchService
+	patch.Service
 	fileListCh chan patch.LatestFileListV2
 }
 
@@ -91,7 +91,7 @@ func (p patchHandler) LatestFileListV2(m patch.LatestFileListV2) {
 }
 
 type loginHandler struct {
-	login.LoginService
+	login.Service
 	authenRspCh chan login.UserAuthenRsp
 }
 
@@ -461,7 +461,7 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 	authenRspCh := make(chan login.UserAuthenRsp)
 
 	r := proto.NewMessageRouter()
-	login.RegisterLoginService(&r, &loginHandler{authenRspCh: authenRspCh})
+	login.RegisterService(&r, &loginHandler{authenRspCh: authenRspCh})
 
 	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutAuthenRsp)
 	defer cancel()
@@ -499,7 +499,7 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 		rec1      = crypto.EncryptRec1(authToken, sid, sessionTimeSecs, sessionTimeMillis)
 	)
 
-	loginClient := login.NewLoginClient(protoClient)
+	loginClient := login.NewClient(protoClient)
 
 	authenV3 := &login.UserAuthenV3{
 		Rec1:   string(rec1),
@@ -611,7 +611,7 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 	fileListCh := make(chan patch.LatestFileListV2)
 
 	r := proto.NewMessageRouter()
-	patch.RegisterPatchService(&r, &patchHandler{fileListCh: fileListCh})
+	patch.RegisterService(&r, &patchHandler{fileListCh: fileListCh})
 
 	ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Second, errTimeoutFileList)
 	defer cancel()
@@ -624,7 +624,7 @@ func (p *patchClient) latestFileList(ctx context.Context) (*patch.LatestFileList
 
 	slog.Info("Connected to patch server", "server", p.LaunchParams.PatchServerAddr)
 
-	c := patch.NewPatchClient(protoClient)
+	c := patch.NewClient(protoClient)
 	if err := c.LatestFileListV2(&patch.LatestFileListV2{}); err != nil {
 		return nil, err
 	}

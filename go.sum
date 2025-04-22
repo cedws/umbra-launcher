@@ -1,7 +1,9 @@
-github.com/cedws/w101-client-go v0.0.0-20241127195155-593f54c07de7 h1:3IrkrMR5v3IqcIvr6m5rApoChpoo2ef/V7RYYStLUzI=
-github.com/cedws/w101-client-go v0.0.0-20241127195155-593f54c07de7/go.mod h1:LEEZPLzH2mdzndxQPSwg+7ho+Q1U+raLB6802UUvLzQ=
-github.com/cedws/w101-proto-go v0.0.0-20241127005008-4a3c16215c55 h1:ZuATZJIzJ87rQwUKOgexzT9bx8mJDPCx8G4D81REKgc=
-github.com/cedws/w101-proto-go v0.0.0-20241127005008-4a3c16215c55/go.mod h1:xRa+HlP7lK7eSl/0MJsv1Fkm1gD8RuEzllQK/dOt2WE=
+github.com/beevik/etree v1.4.1 h1:PmQJDDYahBGNKDcpdX8uPy1xRCwoCGVUiW669MEirVI=
+github.com/beevik/etree v1.4.1/go.mod h1:gPNJNaBGVZ9AwsidazFZyygnd+0pAU38N4D+WemwKNs=
+github.com/cedws/w101-client-go v0.0.0-20250422122836-cb93a34c8554 h1:HicZqYHxU7VxhvpxbE9MJsVY+ow9B2YksB82q5fFMP4=
+github.com/cedws/w101-client-go v0.0.0-20250422122836-cb93a34c8554/go.mod h1:SFs9lFngpNCg1ec9VXF/iQmYcdA0lQc6hDcMAG1BrDE=
+github.com/cedws/w101-proto-go v0.0.0-20250422122956-1062f5360c43 h1:v5Gsg1Fy1zBbwPITepPq+e+z/kKN1PNp3MBcZVSs9Pw=
+github.com/cedws/w101-proto-go v0.0.0-20250422122956-1062f5360c43/go.mod h1:tUwmvKW4Od6KiLc8lHrMn+uJdIj5ZqLwcD6AX5Y+FgQ=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
