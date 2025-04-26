@@ -25,7 +25,6 @@ import (
 	"github.com/cedws/w101-client-go/proto"
 	"github.com/cedws/w101-proto-go/pkg/login"
 	"github.com/cedws/w101-proto-go/pkg/patch"
-	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -125,8 +124,8 @@ type packagesList struct {
 	packages []string
 }
 
-func (l *packagesList) Open(fs afero.Fs) error {
-	file, err := fs.OpenFile("LocalPackagesList.txt", os.O_APPEND|os.O_CREATE, 0o644)
+func (l *packagesList) Open(root *os.Root) error {
+	file, err := root.OpenFile("LocalPackagesList.txt", os.O_APPEND|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
@@ -172,7 +171,7 @@ type patchClient struct {
 	LaunchParams
 	httpClient   *http.Client
 	hasherPool   *sync.Pool
-	fs           afero.Fs
+	fs           *os.Root
 	packagesList packagesList
 }
 
@@ -184,13 +183,18 @@ func newPatchClient(params LaunchParams) (*patchClient, error) {
 		},
 	}
 
-	os.MkdirAll(params.Dir, 0o755)
+	if err := os.MkdirAll(params.Dir, 0o755); err != nil {
+		return nil, err
+	}
 
-	fs := afero.NewBasePathFs(afero.NewOsFs(), params.Dir)
-	fs.MkdirAll("PatchInfo", 0o755)
+	root, err := os.OpenRoot(params.Dir)
+	if err != nil {
+		return nil, err
+	}
+	root.Mkdir("PatchInfo", 0o755)
 
 	var packagesList packagesList
-	if err := packagesList.Open(fs); err != nil {
+	if err := packagesList.Open(root); err != nil {
 		return nil, fmt.Errorf("error opening packages list: %w", err)
 	}
 
@@ -198,7 +202,7 @@ func newPatchClient(params LaunchParams) (*patchClient, error) {
 		LaunchParams: params,
 		httpClient:   &http.Client{},
 		hasherPool:   &hasherPool,
-		fs:           fs,
+		fs:           root,
 		packagesList: packagesList,
 	}, nil
 }
@@ -273,11 +277,11 @@ func (p *patchClient) fileListTables(ctx context.Context, fileList *patch.Latest
 	return dml.DecodeTable(cacheTee)
 }
 
-func createLatestFileList(fs afero.Fs) (io.WriteCloser, error) {
+func createLatestFileList(fs *os.Root) (io.WriteCloser, error) {
 	return fs.Create("PatchInfo/LatestFileList.bin")
 }
 
-func createCRCFile(fs afero.Fs, name string) (io.WriteCloser, error) {
+func createCRCFile(fs *os.Root, name string) (io.WriteCloser, error) {
 	return fs.Create(fmt.Sprintf("PatchInfo/CRC_%v.dat", name))
 }
 
@@ -524,7 +528,7 @@ func (p *patchClient) requestCK2Token(ctx context.Context, params LaunchParams) 
 
 func (p *patchClient) downloadFile(ctx context.Context, patchFile patchFile) error {
 	dirname := filepath.Dir(patchFile.Target)
-	if err := p.fs.MkdirAll(dirname, 0o755); err != nil {
+	if err := mkdirAllInRoot(p.fs, dirname, 0755); err != nil {
 		return err
 	}
 
@@ -577,7 +581,8 @@ func (p *patchClient) verifyFileCRC(patchFile patchFile) (bool, error) {
 		return false, nil
 	case stat.IsDir():
 		// Remove directory which shouldn't exist
-		err = p.fs.RemoveAll(filePath)
+		// TODO: Implement removeAllInRoot
+		err = p.fs.Remove(filePath)
 		return false, err
 	case stat.Size() != int64(patchFile.Size):
 		// File exists but size doesn't match
@@ -654,4 +659,42 @@ func (p *patchClient) request(ctx context.Context, url string) (io.ReadCloser, e
 	}
 
 	return resp.Body, err
+}
+
+func parentDirs(path string) []string {
+	var dirs []string
+
+	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
+		if parent := filepath.Dir(p); parent == p {
+			break
+		}
+		dirs = append(dirs, p)
+	}
+
+	slices.Reverse(dirs)
+
+	return dirs
+}
+
+func mkdirAllInRoot(fs *os.Root, path string, perm os.FileMode) error {
+	path = filepath.Clean(path)
+
+	if fi, err := fs.Stat(path); err == nil {
+		if fi.IsDir() {
+			return nil
+		}
+		return os.ErrExist
+	}
+
+	parentDirs := parentDirs(path)
+
+	for _, dir := range parentDirs {
+		if err := fs.Mkdir(dir, perm); err != nil {
+			if fi, statErr := fs.Stat(dir); statErr != nil || !fi.IsDir() {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
