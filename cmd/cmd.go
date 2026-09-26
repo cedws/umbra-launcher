@@ -10,11 +10,6 @@ import (
 	"github.com/cedws/umbra-launcher/internal/umbra"
 )
 
-const (
-	defaultLoginServer = "login.us.wizard101.com:12000"
-	defaultPatchServer = "patch.us.wizard101.com:12500"
-)
-
 var defaultConcurrencyLimit = runtime.NumCPU()
 
 func Execute() {
@@ -26,13 +21,13 @@ func Execute() {
 		fullPatch                        bool
 	)
 
-	flag.StringVar(&dir, "dir", "Wizard101", "client directory")
+	flag.StringVar(&dir, "dir", umbra.DefaultClientDir(), "client directory")
 
 	flag.StringVar(&username, "username", "", "login username")
 	flag.StringVar(&password, "password", "", "login password")
 
-	flag.StringVar(&loginServerAddr, "login-server", defaultLoginServer, "login server addr")
-	flag.StringVar(&patchServerAddr, "patch-server", defaultPatchServer, "patch server addr")
+	flag.StringVar(&loginServerAddr, "login-server", umbra.DefaultLoginServerAddr(), "login server addr")
+	flag.StringVar(&patchServerAddr, "patch-server", umbra.DefaultPatchServerAddr(), "patch server addr")
 
 	flag.BoolVar(&patchOnly, "patch-only", false, "only patch files without logging in")
 	flag.BoolVar(&fullPatch, "full", false, "patch all game files")

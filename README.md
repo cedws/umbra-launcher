@@ -21,7 +21,7 @@ A patch client for Wizard101. It connects to the Wizard101 patch and login serve
 - `-login-server string`
   - Login server address (default "login.us.wizard101.com:12000")
 - `-patch-server string`
-  - Patch server address (default "patch.us.wizard101.com:12500")
+  - Patch server address (default "patch.us.wizard101.com:12500", or "patch.us.wizard101.com:12600" on macOS)
 - `-patch-only`
   - Only patch files without logging in
 - `-full`

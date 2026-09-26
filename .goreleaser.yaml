@@ -20,6 +20,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
 
 docker_signs:
   - ids:

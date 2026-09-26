@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -34,6 +35,30 @@ const (
 )
 
 const loginServerRetries = 10
+
+// KingsIsle's own patch client selects the build variant by patch server port
+// on the same host: 12500 serves the Windows tree, 12600 the Mac tree and
+// 12700 the Steam tree.
+const (
+	defaultLoginServerAddr = "login.us.wizard101.com:12000"
+
+	defaultWindowsPatchServerAddr = "patch.us.wizard101.com:12500"
+	defaultMacPatchServerAddr     = "patch.us.wizard101.com:12600"
+)
+
+func DefaultLoginServerAddr() string {
+	return defaultLoginServerAddr
+}
+
+// DefaultPatchServerAddr returns the patch server addr serving the build
+// variant for the host OS.
+func DefaultPatchServerAddr() string {
+	if runtime.GOOS == "darwin" {
+		return defaultMacPatchServerAddr
+	}
+
+	return defaultWindowsPatchServerAddr
+}
 
 var (
 	errTimeoutAuthenRsp = fmt.Errorf("timed out waiting for authen response")
