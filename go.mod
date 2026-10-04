@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/cedws/w101-client-go v0.0.0-20250422122836-cb93a34c8554
-	github.com/cedws/w101-proto-go v0.0.0-20250422122956-1062f5360c43
+	github.com/cedws/w101-proto-go v0.0.0-20261004203701-74ae9044faa7
 	github.com/stretchr/testify v1.11.1
 	go.hasen.dev/generic v0.1.8
 	go.hasen.dev/shirei v0.8.1-0.20260924005554-58b0835e6e14
